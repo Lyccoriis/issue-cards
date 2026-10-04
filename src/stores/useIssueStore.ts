@@ -8,9 +8,11 @@ import {
   deleteComment,
   deleteIssue,
   listIssues,
+  listIssuesById,
   rejectIssue,
   setIssueStatus,
   stamp,
+  syncIssues,
   updateIssue,
   updateRejection,
 } from '@/lib/issues';
@@ -21,6 +23,7 @@ import {
   notifyCardStatus,
   notifyRejection,
 } from '@/lib/notifyEvents';
+import { batcher, changed, readCache, writeCache, type Change } from '@/lib/liveRefresh';
 import { errorText, supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { ensureTags } from '@/stores/useTagStore';
@@ -144,7 +147,8 @@ interface IssueStore {
   selectedId: string | null;
   checkedIds: string[];
 
-  load: () => Promise<void>;
+  load: (force?: boolean) => Promise<void>;
+  refresh: (rowIds: string[]) => Promise<void>;
   watch: () => void;
   unwatch: () => void;
   select: (id: string | null) => void;
@@ -227,13 +231,49 @@ function now(): string {
 
 let channel: RealtimeChannel | null = null;
 let watching: string | null = null;
-let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cacheKey(ws: string): string {
+  return `issue-cards:cache:v1:issues:${ws}`;
+}
+
+function attachmentIn(card: IssueCard, id: string): boolean {
+  return (
+    card.attachments.some(a => a.id === id) ||
+    card.rejectionList.some(r => r.attachments.some(a => a.id === id))
+  );
+}
 
 export const useIssueStore = create<IssueStore>((set, get) => {
   const startView = loadView();
   const keepView = () => {
     const { filters, order, sortKey, sortDir, query } = get();
     saveView({ filters, order, sortKey, sortDir, query });
+  };
+
+  const refresher = batcher(ids => get().refresh(ids));
+
+  const onIssue = (payload: Change) => {
+    const id = changed(payload, 'id');
+    if (!id) return;
+    if (payload.eventType === 'UPDATE') {
+      const card = get().cards.find(c => c.rowId === id);
+      if (card && changed(payload, 'updated_at') === card.revision) return;
+    }
+    refresher.add(id);
+  };
+
+  const onChild = (has: (card: IssueCard, id: string) => boolean) => (payload: Change) => {
+    const cards = get().cards;
+    const issueId = changed(payload, 'issue_id');
+    if (issueId) {
+      const card = cards.find(c => c.rowId === issueId);
+      const own = changed(payload, 'id');
+      if (card && !(payload.eventType === 'INSERT' && own && has(card, own))) refresher.add(issueId);
+      return;
+    }
+    const id = changed(payload, 'id');
+    const owner = id ? cards.find(c => has(c, id)) : null;
+    if (owner) refresher.add(owner.rowId);
   };
 
   return {
@@ -250,7 +290,7 @@ export const useIssueStore = create<IssueStore>((set, get) => {
     selectedId: null,
     checkedIds: [],
 
-    load: async () => {
+    load: async (force = false) => {
       const ws = workspaceId();
       if (!ws) {
         set({ cards: [], loading: false, loaded: true });
@@ -261,8 +301,15 @@ export const useIssueStore = create<IssueStore>((set, get) => {
           ? { loading: true, cards: [], checkedIds: [], selectedId: null }
           : { loading: true },
       );
+      const current = get().cards;
+      const known = force
+        ? []
+        : current.length && current[0].workspaceId === ws
+          ? current
+          : (readCache<IssueCard>(cacheKey(ws)) ?? []);
       try {
-        const fresh = await listIssues(ws);
+        if (known.length && known !== current) set({ cards: known, loaded: true });
+        const fresh = known.length ? await syncIssues(ws, known) : await listIssues(ws);
         if (workspaceId() !== ws) return;
         const alive = new Set(fresh.map(c => c.id));
         set(s => ({
@@ -275,7 +322,39 @@ export const useIssueStore = create<IssueStore>((set, get) => {
           checkedIds: s.checkedIds.filter(c => alive.has(c)),
         }));
       } catch (err) {
-        set({ cards: [], loading: false, loaded: true, error: errorText(err) });
+        set(s => ({
+          cards: known.length ? s.cards : [],
+          loading: false,
+          loaded: true,
+          error: errorText(err),
+        }));
+      }
+    },
+
+    refresh: async rowIds => {
+      const ws = workspaceId();
+      if (!ws || !rowIds.length) return;
+      try {
+        const fetched = await listIssuesById(rowIds);
+        if (workspaceId() !== ws) return;
+        const got = new Map(fetched.map(c => [c.rowId, c]));
+        set(s => {
+          const kept = s.cards.flatMap(c => {
+            if (!rowIds.includes(c.rowId) || inflight.has(c.rowId)) return [c];
+            const next = got.get(c.rowId);
+            return next ? [next] : [];
+          });
+          const known = new Set(s.cards.map(c => c.rowId));
+          const cards = [...kept, ...fetched.filter(c => !known.has(c.rowId) && c.workspaceId === ws)];
+          const alive = new Set(cards.map(c => c.id));
+          return {
+            cards,
+            checkedIds: s.checkedIds.filter(id => alive.has(id)),
+            selectedId: s.selectedId && !alive.has(s.selectedId) ? null : s.selectedId,
+          };
+        });
+      } catch {
+        return;
       }
     },
 
@@ -284,25 +363,22 @@ export const useIssueStore = create<IssueStore>((set, get) => {
       if (!ws || watching === ws) return;
       get().unwatch();
       watching = ws;
-      const bump = () => {
-        if (reloadTimer) clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(() => {
-          reloadTimer = null;
-          void get().load();
-        }, 400);
-      };
+      let joined = false;
 
       channel = supabase()
         .channel(`issues:${ws}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'issues', filter: `workspace_id=eq.${ws}` }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'issue_comments' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'issue_attachments' }, bump)
-        .subscribe();
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'issues', filter: `workspace_id=eq.${ws}` }, onIssue)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'issue_comments' }, onChild((c, id) => c.comments.some(x => x.id === id)))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'issue_attachments' }, onChild(attachmentIn))
+        .subscribe(status => {
+          if (status !== 'SUBSCRIBED') return;
+          if (joined) void get().load();
+          joined = true;
+        });
     },
 
     unwatch: () => {
-      if (reloadTimer) clearTimeout(reloadTimer);
-      reloadTimer = null;
+      refresher.clear();
       if (channel) void supabase().removeChannel(channel);
       channel = null;
       watching = null;
@@ -398,7 +474,11 @@ export const useIssueStore = create<IssueStore>((set, get) => {
       if (!ws) return null;
       const card = await createIssue(ws, input);
       if (input.tags?.length) await ensureTags(input.tags);
-      set(state => ({ cards: [...state.cards, card] }));
+      set(state => ({
+        cards: state.cards.some(c => c.rowId === card.rowId)
+          ? state.cards.map(c => (c.rowId === card.rowId ? card : c))
+          : [...state.cards, card],
+      }));
       notifyCardFiled(card);
       return card;
     },
@@ -558,6 +638,11 @@ export const useIssueStore = create<IssueStore>((set, get) => {
       }
     },
   };
+});
+
+useIssueStore.subscribe((state, before) => {
+  if (state.cards === before.cards || !state.loaded || inflight.size || !state.cards.length) return;
+  writeCache(cacheKey(state.cards[0].workspaceId), state.cards);
 });
 
 export function matchesQuery(card: IssueCard, query: string): boolean {

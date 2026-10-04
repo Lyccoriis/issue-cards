@@ -1,4 +1,5 @@
 import { sessionUser, stamp, type NewAttachment } from '@/lib/issues';
+import { idsKey, inChunks } from '@/lib/liveRefresh';
 import { supabase } from '@/lib/supabase';
 import type {
   AttachmentHost,
@@ -116,6 +117,7 @@ function toResult(row: ResultRow): TestResult {
     superseded: row.superseded,
     createdAt: stamp(row.created_at),
     updatedAt: stamp(row.updated_at),
+    revision: row.updated_at,
     attachments: (row.test_attachments ?? [])
       .map(toAttachment)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
@@ -152,6 +154,7 @@ function toFeature(row: FeatureRow): TestFeature {
     createdByName: row.created_by_name,
     createdAt: stamp(row.created_at),
     updatedAt: stamp(row.updated_at),
+    revision: row.updated_at,
     groups: (row.test_groups ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -191,6 +194,70 @@ export async function listNotes(workspaceId: string): Promise<TestNote[]> {
     .order('created_at', { ascending: true });
   if (result.error) throw new Error(result.error.message);
   return ((result.data ?? []) as NoteRow[]).map(toNote);
+}
+
+export async function listNotesFor(featureIds: string[]): Promise<TestNote[]> {
+  const result = await supabase()
+    .from('test_notes')
+    .select('id, feature_id, author, body, created_at, created_by')
+    .in('feature_id', featureIds)
+    .order('created_at', { ascending: true });
+  if (result.error) throw new Error(result.error.message);
+  return ((result.data ?? []) as NoteRow[]).map(toNote);
+}
+
+export async function listFeaturesById(featureIds: string[]): Promise<TestFeature[]> {
+  const result = await supabase().from('test_features').select(SELECT).in('id', featureIds);
+  if (result.error) throw new Error(result.error.message);
+  return ((result.data ?? []) as unknown as FeatureRow[]).map(toFeature);
+}
+
+interface FeatureDigestRow {
+  id: string;
+  updated_at: string;
+  test_groups: { id: string }[];
+  test_results: { id: string; updated_at: string; test_attachments: { id: string }[] }[];
+}
+
+function featureSignature(feature: TestFeature): string {
+  const results = feature.results.map(r => `${r.id}@${r.revision}:${idsKey(r.attachments)}`).sort();
+  return `${feature.revision}|${idsKey(feature.groups)}|${results.join(';')}`;
+}
+
+function digestSignature(row: FeatureDigestRow): string {
+  const results = row.test_results
+    .map(r => `${r.id}@${r.updated_at}:${idsKey(r.test_attachments)}`)
+    .sort();
+  return `${row.updated_at}|${idsKey(row.test_groups)}|${results.join(';')}`;
+}
+
+export async function syncFeatures(workspaceId: string, known: TestFeature[]): Promise<TestFeature[]> {
+  const result = await supabase()
+    .from('test_features')
+    .select('id, updated_at, test_groups!feature_id(id), test_results!feature_id(id, updated_at, test_attachments!result_id(id))')
+    .eq('workspace_id', workspaceId)
+    .order('seq', { ascending: true });
+  if (result.error) throw new Error(result.error.message);
+  const digest = (result.data ?? []) as unknown as FeatureDigestRow[];
+
+  const have = new Map(known.map(f => [f.id, f]));
+  const stale = digest
+    .filter(row => {
+      const feature = have.get(row.id);
+      return !feature || featureSignature(feature) !== digestSignature(row);
+    })
+    .map(row => row.id);
+
+  const fetched = new Map((await inChunks(stale, 25, listFeaturesById)).map(f => [f.id, f]));
+  return digest.flatMap(row => {
+    const feature = fetched.get(row.id) ?? have.get(row.id);
+    return feature ? [feature] : [];
+  });
+}
+
+export async function featureIdOfResult(resultId: string): Promise<string | null> {
+  const result = await supabase().from('test_results').select('feature_id').eq('id', resultId).maybeSingle();
+  return (result.data as { feature_id: string } | null)?.feature_id ?? null;
 }
 
 export async function addNote(

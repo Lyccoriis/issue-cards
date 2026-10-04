@@ -54,7 +54,7 @@ export default function TestingPanel() {
 
   const actions = (
     <>
-      <Button variant="outline" size="sm" onClick={() => void load()}>
+      <Button variant="outline" size="sm" onClick={() => void load(true)}>
         {loading ? (
           <Loader2 size={15} strokeWidth={1.6} className="animate-spin" />
         ) : (

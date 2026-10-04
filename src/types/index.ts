@@ -183,6 +183,7 @@ export interface IssueCard {
   fixedBy: string;
   closedBy: string;
   updatedAt: string;
+  revision: string;
   repo: string;
   codebase: string;
   version: string;
@@ -326,6 +327,7 @@ export interface TestResult {
   superseded: boolean;
   createdAt: string;
   updatedAt: string;
+  revision: string;
   attachments: TestAttachment[];
 }
 
@@ -360,6 +362,7 @@ export interface TestFeature {
   createdByName: string;
   createdAt: string;
   updatedAt: string;
+  revision: string;
   groups: TestGroup[];
   results: TestResult[];
 }

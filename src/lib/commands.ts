@@ -112,7 +112,7 @@ export const APP_COMMANDS: AppCommand[] = [
     icon: RefreshCw,
     defaultKey: 'Ctrl+R',
     run: () => {
-      void useIssueStore.getState().load();
+      void useIssueStore.getState().load(true);
     },
   },
   {

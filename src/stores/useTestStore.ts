@@ -10,16 +10,21 @@ import {
   deleteFeature,
   deleteNote,
   detachFromResult,
+  featureIdOfResult,
   featureStatus,
   fileTestIssue,
   listFeatures,
+  listFeaturesById,
   listNotes,
+  listNotesFor,
   needsTester,
   requestRetest,
   saveFeature,
   setFeatureArchived,
+  syncFeatures,
 } from '@/lib/tests';
 import { notifyAnswer, notifyFeatureSaved, notifyRetest, notifyTestNote } from '@/lib/notifyEvents';
+import { batcher, changed, readCache, writeCache, type Change } from '@/lib/liveRefresh';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useIssueStore } from '@/stores/useIssueStore';
@@ -75,7 +80,7 @@ interface TestStore {
   focusStepId: string | null;
   focus: (stepId: string | null) => void;
 
-  load: () => Promise<void>;
+  load: (force?: boolean) => Promise<void>;
   watch: () => void;
   unwatch: () => void;
   setQuery: (query: string) => void;
@@ -115,13 +120,126 @@ function errorText(err: unknown): string {
 
 let channel: RealtimeChannel | null = null;
 let watching: string | null = null;
-let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cacheKey(ws: string): string {
+  return `issue-cards:cache:v1:tests:${ws}`;
+}
+
+function featureWithResult(features: TestFeature[], resultId: string): TestFeature | undefined {
+  return features.find(f => f.results.some(r => r.id === resultId));
+}
 
 export const useTestStore = create<TestStore>((set, get) => {
-  async function after<T>(work: Promise<T>): Promise<T> {
-    const value = await work;
-    await get().load();
-    return value;
+  async function refetchFeatures(ids: string[]): Promise<void> {
+    const ws = workspaceId();
+    if (!ws || !ids.length) return;
+    try {
+      const fetched = await listFeaturesById(ids);
+      if (workspaceId() !== ws) return;
+      const got = new Map(fetched.map(f => [f.id, f]));
+      set(s => {
+        const kept = s.features.flatMap(f => {
+          if (!ids.includes(f.id)) return [f];
+          const next = got.get(f.id);
+          return next ? [next] : [];
+        });
+        const known = new Set(s.features.map(f => f.id));
+        const features = [
+          ...kept,
+          ...fetched.filter(f => !known.has(f.id) && f.workspaceId === ws),
+        ].sort((a, b) => a.seq - b.seq);
+        return {
+          features,
+          selectedId: features.some(f => f.id === s.selectedId) ? s.selectedId : null,
+        };
+      });
+    } catch {
+      return;
+    }
+  }
+
+  async function refetchNotes(featureIds: string[]): Promise<void> {
+    if (!workspaceId() || !featureIds.length) return;
+    try {
+      const fetched = await listNotesFor(featureIds);
+      set(s => ({ notes: [...s.notes.filter(n => !featureIds.includes(n.featureId)), ...fetched] }));
+    } catch {
+      return;
+    }
+  }
+
+  const featureRefresher = batcher(refetchFeatures);
+  const noteRefresher = batcher(refetchNotes);
+
+  const onFeature = (payload: Change) => {
+    const id = changed(payload, 'id');
+    if (!id) return;
+    if (payload.eventType === 'UPDATE') {
+      const feature = get().features.find(f => f.id === id);
+      if (feature && changed(payload, 'updated_at') === feature.revision) return;
+    }
+    featureRefresher.add(id);
+  };
+
+  const onChild = (
+    has: (feature: TestFeature, id: string) => boolean,
+    current?: (feature: TestFeature, payload: Change) => boolean,
+  ) => (payload: Change) => {
+    const features = get().features;
+    const featureId = changed(payload, 'feature_id');
+    if (featureId) {
+      const feature = features.find(f => f.id === featureId);
+      if (feature && current?.(feature, payload)) return;
+      const mine = changed(payload, 'workspace_id') === workspaceId();
+      if (mine || feature) featureRefresher.add(featureId);
+      return;
+    }
+    const id = changed(payload, 'id');
+    const owner = id ? features.find(f => has(f, id)) : null;
+    if (owner) featureRefresher.add(owner.id);
+  };
+
+  const onAttachment = (payload: Change) => {
+    const resultId = changed(payload, 'result_id');
+    const features = get().features;
+    if (!resultId) {
+      const id = changed(payload, 'id');
+      const owner = id ? features.find(f => f.results.some(r => r.attachments.some(a => a.id === id))) : null;
+      if (owner) featureRefresher.add(owner.id);
+      return;
+    }
+    const owner = featureWithResult(features, resultId);
+    if (owner) {
+      const own = changed(payload, 'id');
+      const result = owner.results.find(r => r.id === resultId);
+      if (!(payload.eventType === 'INSERT' && own && result?.attachments.some(a => a.id === own))) {
+        featureRefresher.add(owner.id);
+      }
+      return;
+    }
+    if (changed(payload, 'workspace_id') !== workspaceId()) return;
+    void featureIdOfResult(resultId).then(id => {
+      if (id) featureRefresher.add(id);
+    });
+  };
+
+  const onNote = (payload: Change) => {
+    const featureId = changed(payload, 'feature_id');
+    if (featureId) {
+      const own = changed(payload, 'id');
+      const have = payload.eventType === 'INSERT' && own && get().notes.some(n => n.id === own);
+      if (!have && changed(payload, 'workspace_id') === workspaceId()) noteRefresher.add(featureId);
+      return;
+    }
+    const id = changed(payload, 'id');
+    const note = id ? get().notes.find(n => n.id === id) : null;
+    if (note) noteRefresher.add(note.featureId);
+  };
+
+  async function afterResult(resultId: string): Promise<void> {
+    const owner = featureWithResult(get().features, resultId);
+    if (owner) await refetchFeatures([owner.id]);
+    else await get().load();
   }
 
   return {
@@ -139,7 +257,7 @@ export const useTestStore = create<TestStore>((set, get) => {
     focusStepId: null,
     focus: stepId => set({ focusStepId: stepId }),
 
-    load: async () => {
+    load: async (force = false) => {
       const ws = workspaceId();
       if (!ws) {
         set({ features: [], notes: [], loading: false, loaded: true });
@@ -150,9 +268,16 @@ export const useTestStore = create<TestStore>((set, get) => {
           ? { loading: true, features: [], notes: [], selectedId: null }
           : { loading: true },
       );
+      const current = get().features;
+      const known = force
+        ? []
+        : current.length && current[0].workspaceId === ws
+          ? current
+          : (readCache<TestFeature>(cacheKey(ws)) ?? []);
       try {
+        if (known.length && known !== current) set({ features: known, loaded: true });
         const [fresh, notes] = await Promise.all([
-          listFeatures(ws),
+          known.length ? syncFeatures(ws, known) : listFeatures(ws),
           listNotes(ws).catch(() => get().notes),
         ]);
         if (workspaceId() !== ws) return;
@@ -165,7 +290,13 @@ export const useTestStore = create<TestStore>((set, get) => {
           selectedId: fresh.some(f => f.id === s.selectedId) ? s.selectedId : null,
         }));
       } catch (err) {
-        set({ features: [], notes: [], loading: false, loaded: true, error: errorText(err) });
+        set(s => ({
+          features: known.length ? s.features : [],
+          notes: known.length ? s.notes : [],
+          loading: false,
+          loaded: true,
+          error: errorText(err),
+        }));
       }
     },
 
@@ -174,28 +305,32 @@ export const useTestStore = create<TestStore>((set, get) => {
       if (!ws || watching === ws) return;
       get().unwatch();
       watching = ws;
-      const bump = () => {
-        if (reloadTimer) clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(() => {
-          reloadTimer = null;
-          void get().load();
-        }, 400);
-      };
+      let joined = false;
 
       channel = supabase()
         .channel(`tests:${ws}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_features', filter: `workspace_id=eq.${ws}` }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_groups' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_steps' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_results' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_attachments' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_notes' }, bump)
-        .subscribe();
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_features', filter: `workspace_id=eq.${ws}` }, onFeature)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_groups' }, onChild((f, id) => f.groups.some(g => g.id === id)))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_steps' }, onChild((f, id) => f.groups.some(g => g.steps.some(s => s.id === id))))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_results' }, onChild(
+          (f, id) => f.results.some(r => r.id === id),
+          (f, p) => {
+            const id = changed(p, 'id');
+            return f.results.some(r => r.id === id && r.revision === changed(p, 'updated_at'));
+          },
+        ))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_attachments' }, onAttachment)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'test_notes' }, onNote)
+        .subscribe(status => {
+          if (status !== 'SUBSCRIBED') return;
+          if (joined) void get().load();
+          joined = true;
+        });
     },
 
     unwatch: () => {
-      if (reloadTimer) clearTimeout(reloadTimer);
-      reloadTimer = null;
+      featureRefresher.clear();
+      noteRefresher.clear();
       if (channel) void supabase().removeChannel(channel);
       channel = null;
       watching = null;
@@ -221,7 +356,8 @@ export const useTestStore = create<TestStore>((set, get) => {
       const ws = workspaceId();
       if (!ws) throw new Error('Open a workspace first');
       const before = featureId ? (get().features.find(f => f.id === featureId) ?? null) : null;
-      const id = await after(saveFeature(ws, featureId, input, me().name));
+      const id = await saveFeature(ws, featureId, input, me().name);
+      await refetchFeatures([id]);
       set({ selectedId: id });
       const saved = get().features.find(f => f.id === id);
       if (saved) notifyFeatureSaved(saved.key, input, before);
@@ -229,22 +365,28 @@ export const useTestStore = create<TestStore>((set, get) => {
     },
 
     remove: async featureId => {
-      await after(deleteFeature(featureId));
+      await deleteFeature(featureId);
+      await refetchFeatures([featureId]);
     },
 
     archive: async (featureId, archived) => {
-      await after(setFeatureArchived(featureId, archived));
+      await setFeatureArchived(featureId, archived);
+      await refetchFeatures([featureId]);
     },
 
     retest: async featureId => {
-      const round = await after(requestRetest(featureId));
+      const round = await requestRetest(featureId);
+      await refetchFeatures([featureId]);
       const feature = get().features.find(f => f.id === featureId);
       if (feature) notifyRetest(feature, round);
       return round;
     },
 
     answer: async (stepId, input) => {
-      const resultId = await after(answerStep(stepId, input, me().name));
+      const resultId = await answerStep(stepId, input, me().name);
+      const owner = get().features.find(f => f.groups.some(g => g.steps.some(s => s.id === stepId)));
+      if (owner) await refetchFeatures([owner.id]);
+      else await get().load();
       for (const feature of get().features) {
         const step = feature.groups.flatMap(g => g.steps).find(s => s.id === stepId);
         if (step) notifyAnswer(feature, step.code, input, resultId);
@@ -252,32 +394,48 @@ export const useTestStore = create<TestStore>((set, get) => {
       return resultId;
     },
     clear: async resultId => {
-      await after(clearAnswer(resultId));
+      const owner = featureWithResult(get().features, resultId);
+      await clearAnswer(resultId);
+      if (owner) await refetchFeatures([owner.id]);
+      else await get().load();
     },
     fileIssue: async resultId => {
       const rowId = await fileTestIssue(resultId);
-      await useIssueStore.getState().load();
+      await useIssueStore.getState().refresh([rowId]);
       return rowId;
     },
     attach: async (resultId, input) => {
-      await after(attachToResult(resultId, input));
+      await attachToResult(resultId, input);
+      await afterResult(resultId);
     },
     detach: async attachmentId => {
-      await after(detachFromResult(attachmentId));
+      const owner = get().features.find(f => f.results.some(r => r.attachments.some(a => a.id === attachmentId)));
+      await detachFromResult(attachmentId);
+      if (owner) await refetchFeatures([owner.id]);
+      else await get().load();
     },
 
     note: async (featureId, text) => {
       const ws = workspaceId();
       if (!ws) throw new Error('Open a workspace first');
       const earlier = get().notes.filter(n => n.featureId === featureId);
-      await after(addNote(ws, featureId, text, me().name));
+      await addNote(ws, featureId, text, me().name);
+      await refetchNotes([featureId]);
       const feature = get().features.find(f => f.id === featureId);
       if (feature) notifyTestNote(feature, text.trim(), earlier);
     },
     unnote: async noteId => {
-      await after(deleteNote(noteId));
+      const owner = get().notes.find(n => n.id === noteId);
+      await deleteNote(noteId);
+      if (owner) await refetchNotes([owner.featureId]);
+      else await get().load();
     },
   };
+});
+
+useTestStore.subscribe((state, before) => {
+  if (state.features === before.features || !state.loaded || !state.features.length) return;
+  writeCache(cacheKey(state.features[0].workspaceId), state.features);
 });
 
 const STATUS_RANK: Record<FeatureStatus, number> = { failing: 0, testing: 1, untested: 2, passed: 3 };

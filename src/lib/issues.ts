@@ -1,3 +1,4 @@
+import { idsKey, inChunks } from '@/lib/liveRefresh';
 import { supabase } from '@/lib/supabase';
 import type {
   Attachment,
@@ -175,6 +176,7 @@ function toCard(row: IssueRow): IssueCard {
     fixedBy: row.fixed_by ?? '',
     closedBy: row.closed_by ?? '',
     updatedAt: stamp(row.updated_at),
+    revision: row.updated_at ?? '',
     createdBy: row.created_by,
     rejectionList: (row.issue_rejections ?? [])
       .map(r => toRejection(r, attachments))
@@ -232,6 +234,51 @@ export async function listIssues(workspaceId: string): Promise<IssueCard[]> {
     .eq('workspace_id', workspaceId)
     .order('seq', { ascending: true });
   return (unwrap(result) as unknown as IssueRow[]).map(toCard);
+}
+
+export async function listIssuesById(rowIds: string[]): Promise<IssueCard[]> {
+  const result = await supabase().from('issues').select(SELECT).in('id', rowIds);
+  if (result.error) throw new Error(result.error.message);
+  return ((result.data ?? []) as unknown as IssueRow[]).map(toCard);
+}
+
+interface IssueDigestRow {
+  id: string;
+  updated_at: string | null;
+  issue_comments: { id: string }[];
+  issue_attachments: { id: string }[];
+  issue_rejections: { id: string }[];
+}
+
+export async function syncIssues(workspaceId: string, known: IssueCard[]): Promise<IssueCard[]> {
+  const result = await supabase()
+    .from('issues')
+    .select('id, updated_at, issue_comments(id), issue_attachments(id), issue_rejections(id)')
+    .eq('workspace_id', workspaceId)
+    .order('seq', { ascending: true });
+  if (result.error) throw new Error(result.error.message);
+  const digest = (result.data ?? []) as unknown as IssueDigestRow[];
+
+  const have = new Map(known.map(c => [c.rowId, c]));
+  const stale = digest
+    .filter(row => {
+      const card = have.get(row.id);
+      if (!card) return true;
+      const files = [...card.attachments, ...card.rejectionList.flatMap(r => r.attachments)];
+      return (
+        (row.updated_at ?? '') !== card.revision ||
+        idsKey(row.issue_comments) !== idsKey(card.comments) ||
+        idsKey(row.issue_attachments) !== idsKey(files) ||
+        idsKey(row.issue_rejections) !== idsKey(card.rejectionList)
+      );
+    })
+    .map(row => row.id);
+
+  const fetched = new Map((await inChunks(stale, 40, listIssuesById)).map(c => [c.rowId, c]));
+  return digest.flatMap(row => {
+    const card = fetched.get(row.id) ?? have.get(row.id);
+    return card ? [card] : [];
+  });
 }
 
 export async function getIssue(rowId: string): Promise<IssueCard> {

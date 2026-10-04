@@ -75,6 +75,8 @@ function announce(item: AppNotification): void {
   if (prefs().desktop) window.api.notify.show({ id: item.id, title: item.title, body: item.body });
 }
 
+const FOCUS_RELOAD_MS = 5 * 60 * 1000;
+
 let channel: RealtimeChannel | null = null;
 
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
@@ -125,7 +127,12 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
       )
       .subscribe();
 
-    const onFocus = () => void get().load();
+    let lastLoad = Date.now();
+    const onFocus = () => {
+      if (Date.now() - lastLoad < FOCUS_RELOAD_MS) return;
+      lastLoad = Date.now();
+      void get().load();
+    };
     window.addEventListener('focus', onFocus);
 
     return () => {

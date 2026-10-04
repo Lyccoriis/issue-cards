@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { fromResult, plainLink } from '@/lib/attach';
 import { attachToIssue, type NewAttachment } from '@/lib/issues';
 import { errorText } from '@/lib/supabase';
-import { attachToResult } from '@/lib/tests';
 import { useIssueStore } from '@/stores/useIssueStore';
 import { useTestStore } from '@/stores/useTestStore';
 import type { UploadJob } from '@/types';
@@ -137,8 +136,7 @@ async function file(target: string, item: NewAttachment, get: Get): Promise<void
 
   if (kind === 'testfail') {
     try {
-      await attachToResult(rowId, item);
-      await useTestStore.getState().load();
+      await useTestStore.getState().attach(rowId, item);
     } catch (err) {
       toast.error(`${item.name} uploaded but could not be filed, ${errorText(err)}`);
     }
