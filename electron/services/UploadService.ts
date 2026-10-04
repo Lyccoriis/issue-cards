@@ -37,7 +37,7 @@ const MAX_LOG_LINES = 25_000
 const STALL_MS = 45_000
 
 const ATTEMPTS = 3
-const BACKOFF_MS = [0, 1_500, 5_000]
+const BACKOFF_MS = [0, 2_000, 8_000]
 
 const RUNNING_AT_ONCE = 2
 
@@ -256,8 +256,8 @@ const toCatbox: Put = async (bytes, name, onSent, signal) => {
 
   const answer = text.trim()
   if (!answer.startsWith('https://')) {
-    throw new Error(`Catbox refused the upload, ${answer || `it answered ${status}`}`, {
-      cause: retryable(status),
+    throw new Error(`Catbox refused the upload, ${answer || 'it sent no reason'} (status ${status})`, {
+      cause: true,
     })
   }
   return answer
