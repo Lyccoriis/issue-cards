@@ -22,7 +22,7 @@ export default function WorkspaceCrest() {
         <TooltipTrigger asChild>
           <Button variant="ghost" size="sm" onClick={() => setActivePanel('settings')} className="gap-2">
             <span className="dot" style={{ background: 'var(--primary)' }} />
-            <span className="max-w-[160px] truncate text-[12px]">{workspace.name}</span>
+            <span className="max-w-[220px] truncate text-[12px]">{workspace.currentVersion ? `${workspace.name} Ver. ${workspace.currentVersion}` : workspace.name}</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="max-w-[240px]">

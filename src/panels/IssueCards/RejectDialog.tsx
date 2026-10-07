@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 
 import AttachmentTray from '@/components/shared/AttachmentTray';
 import MentionField from '@/components/shared/MentionField';
+import VersionSelect from '@/components/shared/VersionSelect';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -46,6 +48,7 @@ export default function RejectDialog() {
   const [severity, setSeverity] = useState<RejectionSeverity>('still-broken');
   const [reason, setReason] = useState('');
   const [tested, setTested] = useState('');
+  const [version, setVersion] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -53,6 +56,7 @@ export default function RejectDialog() {
     setSeverity('still-broken');
     setReason('');
     setTested('');
+    setVersion('');
     setSaving(false);
   }, [card]);
 
@@ -75,13 +79,19 @@ export default function RejectDialog() {
     [staged, card],
   );
 
-  const ready = reason.trim().length > 0 && !saving;
+  const why = !version
+    ? 'Pick the version you tested'
+    : !reason.trim()
+      ? 'Say what is still wrong'
+      : null;
+  const ready = why === null && !saving;
 
   async function confirm() {
     if (!card || !ready) return;
     close();
     try {
       const rejectionId = await reject(card.id, {
+        version,
         severity,
         reason: reason.trim(),
         tested: tested.trim(),
@@ -111,6 +121,11 @@ export default function RejectDialog() {
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-4 pr-3">
+            <Field>
+              <FieldLabel htmlFor="reject-version">Version you tested</FieldLabel>
+              <VersionSelect id="reject-version" value={version} onChange={setVersion} />
+            </Field>
+
             <Field>
               <FieldLabel>How far off was it</FieldLabel>
               <ToggleGroup
@@ -172,7 +187,8 @@ export default function RejectDialog() {
           </div>
         </ScrollArea>
 
-        <DialogFooter>
+        <DialogFooter className="items-center">
+          <WhyDisabled reason={why} className="sm:mr-auto" />
           <Button variant="outline" disabled={saving} onClick={close}>
             Cancel
           </Button>

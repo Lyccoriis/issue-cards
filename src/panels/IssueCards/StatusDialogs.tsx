@@ -32,11 +32,15 @@ export default function StatusDialogs() {
         title={fixing ? `Mark ${fixing.id} fixed` : ''}
         label="Test procedure"
         description="How to check the issue is gone, based on what you actually tried."
+        versionLabel="Version it was fixed in"
         confirmLabel="Mark fixed"
         initial={fixing?.testProcedure ?? ''}
-        onConfirm={text =>
+        onConfirm={(text, version) =>
           fixing
-            ? run(() => setStatus(fixing.id, 'fixed', { testProcedure: text }), `${fixing.id} marked fixed`)
+            ? run(
+                () => setStatus(fixing.id, 'fixed', { testProcedure: text, version }),
+                `${fixing.id} marked fixed`,
+              )
             : Promise.resolve()
         }
       />

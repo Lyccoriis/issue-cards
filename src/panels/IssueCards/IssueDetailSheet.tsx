@@ -19,6 +19,8 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import Notes from '@/components/shared/Notes';
+import VersionSelect from '@/components/shared/VersionSelect';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { lastRejection, useIssueStore } from '@/stores/useIssueStore';
@@ -139,9 +141,9 @@ export default function IssueDetailSheet({ card, onEdit, onSelect }: IssueDetail
           label="Resolve"
           title={`Resolve ${shown.id}?`}
           description="Resolved is set by a person, never by anything automated, so this is the confirmation the rule asks for."
-          onConfirm={() =>
+          onConfirm={version =>
             void run(
-              () => setStatus(shown.id, 'resolved', { humanConfirmed: true }),
+              () => setStatus(shown.id, 'resolved', { humanConfirmed: true, version }),
               `${shown.id} resolved`,
             )
           }
@@ -153,9 +155,9 @@ export default function IssueDetailSheet({ card, onEdit, onSelect }: IssueDetail
           label="Wontfix"
           title={`Close ${shown.id} as wontfix?`}
           description="Wontfix is set by a person, never by anything automated, so this is the confirmation the rule asks for."
-          onConfirm={() =>
+          onConfirm={version =>
             void run(
-              () => setStatus(shown.id, 'wontfix', { humanConfirmed: true }),
+              () => setStatus(shown.id, 'wontfix', { humanConfirmed: true, version }),
               `${shown.id} closed as wontfix`,
             )
           }
@@ -225,11 +227,11 @@ export default function IssueDetailSheet({ card, onEdit, onSelect }: IssueDetail
 
         <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12px]">
           <span className="text-muted-foreground">opened</span>
-          <Stamp time={shown.timeOpened} />
+          <Stamp time={shown.timeOpened} version={shown.version} />
           {shown.timeFixed && (
             <>
               <span className="text-muted-foreground">fixed</span>
-              <Stamp time={shown.timeFixed} by={shown.fixedBy} />
+              <Stamp time={shown.timeFixed} by={shown.fixedBy} version={shown.fixedVersion} />
             </>
           )}
           {shown.timeClosed && (
@@ -237,7 +239,7 @@ export default function IssueDetailSheet({ card, onEdit, onSelect }: IssueDetail
               <span className="text-muted-foreground">
                 {shown.status === 'wontfix' ? 'wontfix' : 'resolved'}
               </span>
-              <Stamp time={shown.timeClosed} by={shown.closedBy} />
+              <Stamp time={shown.timeClosed} by={shown.closedBy} version={shown.closedVersion} />
             </>
           )}
           {shown.dueDate && (
@@ -353,12 +355,13 @@ export default function IssueDetailSheet({ card, onEdit, onSelect }: IssueDetail
   );
 }
 
-function Stamp({ time, by }: { time: string; by?: string }) {
+function Stamp({ time, by, version }: { time: string; by?: string; version?: string }) {
   const rel = relTime(time);
   return (
     <span className="mono flex flex-wrap items-center gap-1.5">
       {time || '-'}
       {rel && <span className="text-muted-foreground">· {rel}</span>}
+      {version?.trim() && <Badge variant="secondary">Ver. {version.trim()}</Badge>}
       {by?.trim() && (
         <span className="flex items-center gap-1.5 text-muted-foreground">
           · by <PersonLine name={by.trim()} />
@@ -372,12 +375,14 @@ interface HumanConfirmProps {
   label: string;
   title: string;
   description: string;
-  onConfirm: () => void;
+  onConfirm: (version: string) => void;
 }
 
 function HumanConfirm({ label, title, description, onConfirm }: HumanConfirmProps) {
+  const [version, setVersion] = useState('');
+
   return (
-    <AlertDialog>
+    <AlertDialog onOpenChange={open => open && setVersion('')}>
       <AlertDialogTrigger asChild>
         <Button variant="outline" size="sm">
           {label}
@@ -388,9 +393,16 @@ function HumanConfirm({ label, title, description, onConfirm }: HumanConfirmProp
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[12px] text-muted-foreground">Version it was done in</span>
+          <VersionSelect value={version} onChange={setVersion} />
+          <WhyDisabled reason={version ? null : `${label} stays off until you pick a version`} />
+        </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>{label}</AlertDialogAction>
+          <AlertDialogAction disabled={!version} onClick={() => onConfirm(version)}>
+            {label}
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

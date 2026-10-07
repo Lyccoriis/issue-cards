@@ -40,6 +40,7 @@ interface ResultRow {
   result: string;
   why: string;
   repro: string;
+  version: string | null;
   round: number;
   superseded: boolean;
   created_at: string;
@@ -113,6 +114,7 @@ function toResult(row: ResultRow): TestResult {
     result: row.result as TestAnswer,
     why: row.why,
     repro: row.repro,
+    version: row.version ?? '',
     round: row.round,
     superseded: row.superseded,
     createdAt: stamp(row.created_at),
@@ -300,6 +302,7 @@ export async function saveFeature(
   input: NewTestFeature,
   author: string,
 ): Promise<string> {
+  if (!input.version.trim()) throw new Error('Pick the version this feature was done in');
   const { data, error } = await supabase().rpc('save_test_feature', {
     p_feature: featureId,
     p_workspace: workspaceId,
@@ -337,10 +340,13 @@ export async function answerStep(
   const user = await sessionUser();
   if (!user) throw new Error('Sign in again to answer a step');
 
+  const version = input.version.trim();
+  if (!version) throw new Error('Pick the version you are testing on');
+
   const row =
     input.result === 'fail'
-      ? { result: 'fail', why: input.why.trim(), repro: input.repro.trim(), tester_name: testerName }
-      : { result: 'pass', tester_name: testerName };
+      ? { result: 'fail', why: input.why.trim(), repro: input.repro.trim(), tester_name: testerName, version }
+      : { result: 'pass', tester_name: testerName, version };
 
   const live = await supabase()
     .from('test_results')

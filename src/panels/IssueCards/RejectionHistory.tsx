@@ -31,6 +31,7 @@ export function RejectionBanner({ rejection }: { rejection: Rejection }) {
         <Undo2 size={15} strokeWidth={1.6} className="text-destructive" />
         <span className="text-[12px] font-semibold text-foreground">The last fix was rejected</span>
         <SeverityBadge severity={rejection.severity} />
+        {rejection.version && <Badge variant="secondary">Ver. {rejection.version}</Badge>}
         <span className="mono ml-auto flex items-center gap-1.5">
           {rejection.by ? (
             <PersonLine userId={rejection.byId} name={rejection.by} />
@@ -73,6 +74,7 @@ export default function RejectionHistory({
               )}
             </span>
             <SeverityBadge severity={row.severity} />
+            {row.version && <Badge variant="secondary">Ver. {row.version}</Badge>}
             {row.time && (
               <span className="mono ml-auto">
                 {row.time}

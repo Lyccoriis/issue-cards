@@ -129,6 +129,7 @@ interface AuthStore {
   joinWorkspace: (code: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   recolorWorkspace: (id: string, color: string) => Promise<void>;
+  setCurrentVersion: (id: string, version: string) => Promise<void>;
   regenerateInviteCode: (id: string) => Promise<void>;
   leaveWorkspace: (id: string) => Promise<void>;
   removeMember: (userId: string) => Promise<void>;
@@ -250,6 +251,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         invite_code: string;
         owner_id: string;
         color: string | null;
+        current_version: string | null;
+        versions: string[] | null;
         workspace_members: { role: string }[] | null;
       } | null;
     }[];
@@ -262,6 +265,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         inviteCode: r.workspaces!.invite_code,
         ownerId: r.workspaces!.owner_id,
         color: r.workspaces!.color || 'blue',
+        currentVersion: r.workspaces!.current_version ?? '',
+        versions: r.workspaces!.versions ?? [],
         role: toRole(r.role),
         memberCount: (r.workspaces!.workspace_members ?? []).filter(m => m.role !== 'reader').length,
       }))
@@ -389,6 +394,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       await get().loadWorkspaces();
       throw new Error(error.message);
     }
+  },
+
+  setCurrentVersion: async (id, version) => {
+    const { error } = await supabase()
+      .from('workspaces')
+      .update({ current_version: version.trim() })
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+    await get().loadWorkspaces();
   },
 
   regenerateInviteCode: async id => {

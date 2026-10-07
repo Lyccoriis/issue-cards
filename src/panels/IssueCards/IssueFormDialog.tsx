@@ -6,6 +6,8 @@ import AttachmentTray from '@/components/shared/AttachmentTray';
 import DatePicker from '@/components/shared/DatePicker';
 import TagInput from '@/components/shared/TagInput';
 import ValueInput from '@/components/shared/ValueInput';
+import VersionSelect from '@/components/shared/VersionSelect';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import MentionField from '@/components/shared/MentionField';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -94,7 +96,6 @@ export default function IssueFormDialog() {
   const tags = useTags();
   const known = useMemo(() => tagRows(tags, cards).map(row => row.name), [tags, cards]);
   const codebases = useMemo(() => metaRows(cards, 'codebase').map(row => row.name), [cards]);
-  const versions = useMemo(() => metaRows(cards, 'version').map(row => row.name), [cards]);
 
   const [draft, setDraft] = useState<Draft>(() => draftFrom(card));
   const [saving, setSaving] = useState(false);
@@ -146,7 +147,12 @@ export default function IssueFormDialog() {
     return (value: Draft[K]) => setDraft(d => ({ ...d, [key]: value }));
   }
 
-  const ready = draft.title.trim().length > 0 && !saving;
+  const why = !draft.title.trim()
+    ? 'Give the card a title'
+    : !draft.version.trim()
+      ? 'Pick the version it was seen on'
+      : null;
+  const ready = why === null && !saving;
 
   async function save() {
     if (!ready) return;
@@ -336,14 +342,8 @@ export default function IssueFormDialog() {
 
               <Field>
                 <FieldLabel htmlFor="issue-version">Version</FieldLabel>
-                <ValueInput
-                  id="issue-version"
-                  value={draft.version}
-                  onChange={field('version')}
-                  suggestions={versions}
-                  placeholder="0.16"
-                />
-                <FieldDescription>The version it was seen on.</FieldDescription>
+                <VersionSelect id="issue-version" value={draft.version} onChange={field('version')} />
+                <FieldDescription>The version it was seen on, pick one.</FieldDescription>
               </Field>
 
               <Field>
@@ -409,13 +409,17 @@ export default function IssueFormDialog() {
         </div>
 
         <DialogFooter className="items-center">
-          <span className="mr-auto flex items-center gap-2 text-[12px] text-muted-foreground">
-            <KbdGroup>
-              <Kbd>Ctrl</Kbd>
-              <Kbd>Enter</Kbd>
-            </KbdGroup>
-            to {card ? 'save' : 'create'}
-          </span>
+          {why ? (
+            <WhyDisabled reason={why} className="sm:mr-auto" />
+          ) : (
+            <span className="mr-auto flex items-center gap-2 text-[12px] text-muted-foreground">
+              <KbdGroup>
+                <Kbd>Ctrl</Kbd>
+                <Kbd>Enter</Kbd>
+              </KbdGroup>
+              to {card ? 'save' : 'create'}
+            </span>
+          )}
 
           <Button
             variant="outline"

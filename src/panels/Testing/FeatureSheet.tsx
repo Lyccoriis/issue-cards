@@ -15,6 +15,8 @@ import { toast } from 'sonner';
 
 import DetailViewer, { DetailMarkdown, DetailSection } from '@/components/shared/DetailViewer';
 import Notes from '@/components/shared/Notes';
+import VersionSelect from '@/components/shared/VersionSelect';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { RichInline } from '@/components/shared/Mentions';
 import {
   AlertDialog,
@@ -66,10 +68,16 @@ export default function FeatureSheet({ feature }: { feature: TestFeature | null 
   const rows = useRef(new Map<string, HTMLDivElement>());
   const [last, setLast] = useState<TestFeature | null>(feature);
   const [flash, setFlash] = useState<string | null>(null);
+  const [testVersion, setTestVersion] = useState('');
 
   useEffect(() => {
     if (feature) setLast(feature);
   }, [feature]);
+
+  const openId = feature?.id;
+  useEffect(() => {
+    setTestVersion('');
+  }, [openId]);
 
   useEffect(() => {
     if (!focusStepId || !feature) return;
@@ -275,6 +283,14 @@ export default function FeatureSheet({ feature }: { feature: TestFeature | null 
             </div>
           )}
 
+          {can.markTests && (
+            <div className="flex items-center gap-3">
+              <span className="text-[12px] whitespace-nowrap text-muted-foreground">Testing on version</span>
+              <VersionSelect value={testVersion} onChange={setTestVersion} />
+              <WhyDisabled reason={testVersion ? null : 'Works and Broken stay off until you pick one'} />
+            </div>
+          )}
+
           {allDone && (
             <div
               className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]"
@@ -311,6 +327,7 @@ export default function FeatureSheet({ feature }: { feature: TestFeature | null 
                   step={step}
                   myId={myId}
                   canMark={can.markTests}
+                  testVersion={testVersion}
                   flash={flash === step.id}
                   rowRef={el => {
                     if (el) rows.current.set(step.id, el);

@@ -3,6 +3,8 @@ import { CircleCheck, FileUp, FlaskConical } from 'lucide-react';
 import { toast } from 'sonner';
 
 import MentionField from '@/components/shared/MentionField';
+import VersionSelect from '@/components/shared/VersionSelect';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +16,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { errorText } from '@/lib/supabase';
 import { formatTestList, parseFeatureFile, parseTestList } from '@/lib/testParser';
@@ -93,13 +94,18 @@ export default function FeatureFormDialog() {
       .map(s => s.code);
   }, [editingId, parsed]);
 
-  const ready =
-    title.trim().length > 0 &&
-    done.trim().length > 0 &&
-    parsed !== null &&
-    parsed.errors.length === 0 &&
-    parsed.groups.length > 0 &&
-    !saving;
+  const why = !title.trim()
+    ? 'Give the feature a name'
+    : !version.trim()
+      ? 'Pick the version it was done in'
+      : !done.trim()
+        ? 'Say what was done'
+        : !parsed || parsed.groups.length === 0
+          ? 'Write at least one test in What to test'
+          : parsed.errors.length > 0
+            ? 'Fix the errors under What to test'
+            : null;
+  const ready = why === null && !saving;
 
   async function submit() {
     if (!ready || !parsed) return;
@@ -134,7 +140,7 @@ export default function FeatureFormDialog() {
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-4 pr-3">
-            <div className="grid grid-cols-[1fr_140px] gap-3">
+            <div className="grid grid-cols-[1fr_170px] gap-3">
               <Field>
                 <FieldLabel htmlFor="test-title">Name</FieldLabel>
                 <MentionField
@@ -147,12 +153,7 @@ export default function FeatureFormDialog() {
               </Field>
               <Field>
                 <FieldLabel htmlFor="test-version">Version</FieldLabel>
-                <Input
-                  id="test-version"
-                  value={version}
-                  onChange={e => setVersion(e.target.value)}
-                  placeholder="1.2.0"
-                />
+                <VersionSelect id="test-version" value={version} onChange={setVersion} />
               </Field>
             </div>
 
@@ -223,7 +224,8 @@ export default function FeatureFormDialog() {
           </div>
         </ScrollArea>
 
-        <DialogFooter>
+        <DialogFooter className="items-center">
+          <WhyDisabled reason={why} className="sm:mr-auto" />
           <Button variant="outline" disabled={saving} onClick={close}>
             Cancel
           </Button>

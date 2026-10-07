@@ -22,11 +22,20 @@ interface StepRowProps {
   step: TestStep;
   myId: string | null;
   canMark: boolean;
+  testVersion: string;
   flash: boolean;
   rowRef: (el: HTMLDivElement | null) => void;
 }
 
-export default function StepRow({ feature, step, myId, canMark, flash, rowRef }: StepRowProps) {
+export default function StepRow({
+  feature,
+  step,
+  myId,
+  canMark,
+  testVersion,
+  flash,
+  rowRef,
+}: StepRowProps) {
   const answer = useTestStore(s => s.answer);
   const clear = useTestStore(s => s.clear);
   const cards = useIssueStore(s => s.cards);
@@ -44,11 +53,11 @@ export default function StepRow({ feature, step, myId, canMark, flash, rowRef }:
   const strip = passed ? 'var(--success)' : failed ? 'var(--destructive)' : 'var(--border)';
 
   async function works() {
-    if (passed || busy) return;
+    if (passed || busy || !testVersion) return;
     setBusy('pass');
     setFormOpen(false);
     try {
-      await answer(step.id, { result: 'pass', why: '', repro: '' });
+      await answer(step.id, { version: testVersion, result: 'pass', why: '', repro: '' });
     } catch (err) {
       toast.error(errorText(err));
     }
@@ -100,7 +109,8 @@ export default function StepRow({ feature, step, myId, canMark, flash, rowRef }:
               size="sm"
               variant={passed ? 'default' : 'outline'}
               className="w-[88px]"
-              disabled={busy !== null}
+              disabled={busy !== null || !testVersion}
+              title={testVersion ? undefined : 'Pick the version you are testing on first'}
               onClick={() => void works()}
               style={
                 passed
@@ -115,7 +125,8 @@ export default function StepRow({ feature, step, myId, canMark, flash, rowRef }:
               size="sm"
               variant={failed ? 'default' : 'outline'}
               className="w-[88px]"
-              disabled={busy !== null}
+              disabled={busy !== null || !testVersion}
+              title={testVersion ? undefined : 'Pick the version you are testing on first'}
               onClick={() => setFormOpen(true)}
               style={
                 failed
@@ -131,7 +142,7 @@ export default function StepRow({ feature, step, myId, canMark, flash, rowRef }:
       </div>
 
       {formOpen && canMark && (
-        <FailForm step={step} existing={mine} onClose={() => setFormOpen(false)} />
+        <FailForm step={step} existing={mine} testVersion={testVersion} onClose={() => setFormOpen(false)} />
       )}
 
       {fails.map(result => (
@@ -171,6 +182,7 @@ export default function StepRow({ feature, step, myId, canMark, flash, rowRef }:
               <span className="text-foreground">
                 <PersonLine userId={result.userId} name={result.testerName || 'Someone'} />
               </span>
+              {result.version && <span className="mono text-muted-foreground">Ver. {result.version}</span>}
             </span>
           ))}
           {mine && !formOpen && (
@@ -212,6 +224,7 @@ function FailNote({
         <X size={13} strokeWidth={2} style={{ color: 'var(--destructive)' }} />
         <PersonLine userId={result.userId} name={result.testerName || 'Someone'} />
         <span>says it is broken · {result.updatedAt}</span>
+        {result.version && <span>· Ver. {result.version}</span>}
         {mine && (
           <Button variant="ghost" size="xs" className="ml-auto" onClick={onEdit}>
             <Pencil size={12} strokeWidth={1.8} />

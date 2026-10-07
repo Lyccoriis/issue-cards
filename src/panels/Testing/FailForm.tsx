@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import AttachmentTray from '@/components/shared/AttachmentTray';
 import MentionField from '@/components/shared/MentionField';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { Button } from '@/components/ui/button';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Spinner } from '@/components/ui/spinner';
@@ -18,10 +19,11 @@ import { resultAttachments, tint } from './TestBits';
 interface FailFormProps {
   step: TestStep;
   existing: TestResult | null;
+  testVersion: string;
   onClose: () => void;
 }
 
-export default function FailForm({ step, existing, onClose }: FailFormProps) {
+export default function FailForm({ step, existing, testVersion, onClose }: FailFormProps) {
   const answer = useTestStore(s => s.answer);
   const fileIssue = useTestStore(s => s.fileIssue);
   const reload = useTestStore(s => s.load);
@@ -53,14 +55,21 @@ export default function FailForm({ step, existing, onClose }: FailFormProps) {
     }));
   }, [existing, staged]);
 
-  const ready = why.trim().length > 0 && repro.trim().length > 0 && !saving;
+  const blocked = !testVersion
+    ? 'Pick the version you are testing on, above the steps'
+    : !why.trim()
+      ? 'Say what went wrong'
+      : !repro.trim()
+        ? 'Say how to see it'
+        : null;
+  const ready = blocked === null && !saving;
 
   async function send() {
     if (!ready) return;
     setSaving(true);
     let resultId: string;
     try {
-      resultId = await answer(step.id, { result: 'fail', why, repro });
+      resultId = await answer(step.id, { version: testVersion, result: 'fail', why, repro });
       if (!existing) {
         const pending = drain(target);
         for (const item of pending) await attachToResult(resultId, item);
@@ -120,7 +129,8 @@ export default function FailForm({ step, existing, onClose }: FailFormProps) {
         <AttachmentTray target={target} attachments={shown} onRemove={remove} />
       </Field>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex items-center justify-end gap-2">
+        <WhyDisabled reason={blocked} className="mr-auto" />
         <Button variant="outline" disabled={saving} onClick={onClose}>
           Cancel
         </Button>

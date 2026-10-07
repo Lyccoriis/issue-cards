@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 
 import MentionField from '@/components/shared/MentionField';
+import VersionSelect from '@/components/shared/VersionSelect';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -19,7 +21,8 @@ interface ReasonDialogProps {
   description: string;
   confirmLabel: string;
   initial?: string;
-  onConfirm: (text: string) => Promise<unknown>;
+  versionLabel?: string;
+  onConfirm: (text: string, version: string) => Promise<unknown>;
 }
 
 export default function ReasonDialog({
@@ -30,18 +33,29 @@ export default function ReasonDialog({
   description,
   confirmLabel,
   initial = '',
+  versionLabel,
   onConfirm,
 }: ReasonDialogProps) {
   const [text, setText] = useState(initial);
+  const [version, setVersion] = useState('');
 
   useEffect(() => {
-    if (open) setText(initial);
+    if (!open) return;
+    setText(initial);
+    setVersion('');
   }, [open, initial]);
 
+  const why = !text.trim()
+    ? `Write the ${label.toLowerCase()} first`
+    : versionLabel && !version
+      ? 'Pick a version first'
+      : null;
+  const ready = why === null;
+
   async function confirm() {
-    if (!text.trim()) return;
+    if (!ready) return;
     onOpenChange(false);
-    await onConfirm(text.trim());
+    await onConfirm(text.trim(), version);
   }
 
   return (
@@ -61,11 +75,18 @@ export default function ReasonDialog({
           />
           <FieldDescription>{description}</FieldDescription>
         </Field>
-        <DialogFooter>
+        {versionLabel && (
+          <Field>
+            <FieldLabel htmlFor="reason-version">{versionLabel}</FieldLabel>
+            <VersionSelect id="reason-version" value={version} onChange={setVersion} />
+          </Field>
+        )}
+        <DialogFooter className="items-center">
+          <WhyDisabled reason={why} className="sm:mr-auto" />
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button disabled={!text.trim()} onClick={() => void confirm()}>
+          <Button disabled={!ready} onClick={() => void confirm()}>
             {confirmLabel}
           </Button>
         </DialogFooter>

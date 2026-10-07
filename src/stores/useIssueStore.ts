@@ -233,7 +233,7 @@ let channel: RealtimeChannel | null = null;
 let watching: string | null = null;
 
 function cacheKey(ws: string): string {
-  return `issue-cards:cache:v1:issues:${ws}`;
+  return `issue-cards:cache:v2:issues:${ws}`;
 }
 
 function attachmentIn(card: IssueCard, id: string): boolean {
@@ -511,9 +511,16 @@ export const useIssueStore = create<IssueStore>((set, get) => {
           status,
           updatedAt: now(),
           ...(status === 'fixed'
-            ? { fixedBy: author, timeFixed: now(), testProcedure: opts?.testProcedure?.trim() || c.testProcedure }
+            ? {
+                fixedBy: author,
+                fixedVersion: opts?.version?.trim() ?? '',
+                timeFixed: now(),
+                testProcedure: opts?.testProcedure?.trim() || c.testProcedure,
+              }
             : {}),
-          ...(closing ? { closedBy: author, timeClosed: now() } : { timeClosed: '' }),
+          ...(closing
+            ? { closedBy: author, closedVersion: opts?.version?.trim() ?? '', timeClosed: now() }
+            : { timeClosed: '', closedVersion: '' }),
         }),
         () => setIssueStatus(known.rowId, status, { ...opts, author }, known),
       );
@@ -528,7 +535,7 @@ export const useIssueStore = create<IssueStore>((set, get) => {
       await write(
         set,
         known.rowId,
-        c => ({ ...c, status: 'open', timeFixed: '', updatedAt: now() }),
+        c => ({ ...c, status: 'open', timeFixed: '', fixedVersion: '', updatedAt: now() }),
         async () => {
           const result = await rejectIssue(known.rowId, input, author ?? authorName(), known);
           rejectionId = result.rejectionId;

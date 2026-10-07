@@ -44,6 +44,8 @@ interface IssueRow {
   time_closed: string | null;
   fixed_by: string | null;
   closed_by: string | null;
+  fixed_version: string | null;
+  closed_version: string | null;
   updated_at: string | null;
   created_by: string | null;
   issue_comments?: CommentRow[];
@@ -59,6 +61,7 @@ interface RejectionRow {
   tested: string;
   by_name: string;
   fix_by: string;
+  version: string | null;
   created_at: string;
   created_by: string | null;
 }
@@ -89,7 +92,7 @@ interface CommentRow {
 const SELECT =
   '*, issue_comments(id, author, body, created_at, created_by)' +
   ', issue_attachments(id, issue_id, url, kind, host, name, mime, bytes, source_url, rejection_id, created_at, created_by)' +
-  ', issue_rejections(id, issue_id, severity, reason, tested, by_name, fix_by, created_at, created_by)';
+  ', issue_rejections(id, issue_id, severity, reason, tested, by_name, fix_by, version, created_at, created_by)';
 
 export function stamp(iso: string | null): string {
   if (!iso) return '';
@@ -137,6 +140,7 @@ function toRejection(row: RejectionRow, attachments: Attachment[]): Rejection {
     by: row.by_name,
     byId: row.created_by,
     fixBy: row.fix_by ?? '',
+    version: row.version ?? '',
     attachments: attachments.filter(a => a.rejectionId === row.id),
   };
 }
@@ -175,6 +179,8 @@ function toCard(row: IssueRow): IssueCard {
     timeClosed: stamp(row.time_closed),
     fixedBy: row.fixed_by ?? '',
     closedBy: row.closed_by ?? '',
+    fixedVersion: row.fixed_version ?? '',
+    closedVersion: row.closed_version ?? '',
     updatedAt: stamp(row.updated_at),
     revision: row.updated_at ?? '',
     createdBy: row.created_by,
@@ -323,12 +329,22 @@ export async function setIssueStatus(
   }
 
   const who = opts.author?.trim() || '';
+  const version = opts.version?.trim() || '';
+  const closing = status === 'resolved' || status === 'wontfix';
+  if ((status === 'fixed' || closing) && !version) {
+    throw new Error('Pick the version this was done in');
+  }
+
   const row: WriteRow = { status };
   if (status === 'fixed') {
     row.test_procedure = testProcedure;
     row.fixed_by = who;
+    row.fixed_version = version;
   }
-  if (status === 'resolved' || status === 'wontfix') row.closed_by = who;
+  if (closing) {
+    row.closed_by = who;
+    row.closed_version = version;
+  }
   const result = await supabase().from('issues').update(row).eq('id', rowId).select(SELECT).single();
   return toCard(unwrap(result) as unknown as IssueRow);
 }
@@ -346,6 +362,7 @@ export async function rejectIssue(
 ): Promise<RejectResult> {
   const reason = input.reason.trim();
   if (!reason) throw new Error('A rejection needs a reason');
+  if (!input.version.trim()) throw new Error('Pick the version you tested');
 
   const current = known ?? (await getIssue(rowId));
   if (current.status !== 'fixed') throw new Error('Only a fixed card can be rejected');
@@ -362,6 +379,7 @@ export async function rejectIssue(
       tested: input.tested.trim(),
       by_name: who,
       fix_by: current.fixedBy,
+      version: input.version.trim(),
       created_by: user?.id ?? null,
     })
     .select('id')

@@ -1,6 +1,6 @@
 {
   "name": "issue-cards",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "author": "Lyc and Ezk",
   "description": "Shared issue tracker, desktop app",
   "main": "dist/electron/main.js",

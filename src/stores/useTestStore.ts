@@ -122,7 +122,7 @@ let channel: RealtimeChannel | null = null;
 let watching: string | null = null;
 
 function cacheKey(ws: string): string {
-  return `issue-cards:cache:v1:tests:${ws}`;
+  return `issue-cards:cache:v2:tests:${ws}`;
 }
 
 function featureWithResult(features: TestFeature[], resultId: string): TestFeature | undefined {

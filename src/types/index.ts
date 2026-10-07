@@ -96,6 +96,8 @@ export interface Workspace {
   inviteCode: string;
   ownerId: string;
   color: string;
+  currentVersion: string;
+  versions: string[];
   role: MemberRole;
   memberCount: number;
 }
@@ -182,6 +184,8 @@ export interface IssueCard {
   timeClosed: string;
   fixedBy: string;
   closedBy: string;
+  fixedVersion: string;
+  closedVersion: string;
   updatedAt: string;
   revision: string;
   repo: string;
@@ -221,6 +225,8 @@ export type IssueCardPatch = Partial<
     | 'rejectionList'
     | 'fixedBy'
     | 'closedBy'
+    | 'fixedVersion'
+    | 'closedVersion'
     | 'comments'
     | 'attachments'
     | 'createdBy'
@@ -255,10 +261,12 @@ export interface Rejection {
   by: string;
   byId: string | null;
   fixBy: string;
+  version: string;
   attachments: Attachment[];
 }
 
 export interface NewRejection {
+  version: string;
   severity: RejectionSeverity;
   reason: string;
   tested: string;
@@ -266,6 +274,7 @@ export interface NewRejection {
 
 export interface SetStatusOpts {
   testProcedure?: string;
+  version?: string;
   humanConfirmed?: boolean;
   author?: string;
 }
@@ -323,6 +332,7 @@ export interface TestResult {
   result: TestAnswer;
   why: string;
   repro: string;
+  version: string;
   round: number;
   superseded: boolean;
   createdAt: string;
@@ -397,6 +407,7 @@ export interface TestNote {
 }
 
 export interface TestAnswerInput {
+  version: string;
   result: TestAnswer;
   why: string;
   repro: string;

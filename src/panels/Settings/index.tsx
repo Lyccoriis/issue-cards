@@ -6,6 +6,7 @@ import PanelShell from '@/components/layout/PanelShell';
 import ColorPicker from '@/components/shared/ColorPicker';
 import ColorSwatches from '@/components/shared/ColorSwatches';
 import UserAvatar from '@/components/shared/UserAvatar';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -223,6 +224,11 @@ export default function SettingsPanel() {
 }
 
 const BIO_MAX = 140;
+const VERSION_MAX = 24;
+
+function cleanVersion(raw: string): string {
+  return raw.replace(/[^\w.+-]/g, '').slice(0, VERSION_MAX);
+}
 
 function AccountCard() {
   const profile = useAuthStore(s => s.profile)!;
@@ -415,6 +421,7 @@ function AccountCard() {
               value={password}
               onChange={e => setPassword(e.target.value)}
             />
+            <WhyDisabled reason={password ? null : 'Type a new password first'} className="max-w-[200px] text-right" />
             <Button size="sm" onClick={() => void savePassword()} disabled={!password}>Change</Button>
           </SettingRow>
         </ItemGroup>
@@ -436,6 +443,7 @@ function WorkspaceCard() {
   const members = useAuthStore(s => s.members);
   const renameWorkspace = useAuthStore(s => s.renameWorkspace);
   const recolorWorkspace = useAuthStore(s => s.recolorWorkspace);
+  const setCurrentVersion = useAuthStore(s => s.setCurrentVersion);
   const leaveWorkspace = useAuthStore(s => s.leaveWorkspace);
   const regenerateInviteCode = useAuthStore(s => s.regenerateInviteCode);
   const meId = useAuthStore(s => s.profile?.id);
@@ -444,6 +452,7 @@ function WorkspaceCard() {
 
   const active = workspaces.find(w => w.id === activeId) ?? null;
   const [name, setName] = useState(active?.name ?? '');
+  const [version, setVersion] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
 
@@ -501,6 +510,49 @@ function WorkspaceCard() {
               disabled={!can.editWorkspace}
               onClick={() =>
                 void renameWorkspace(active.id, name).catch(err => toast.error(errorText(err)))
+              }
+            >
+              Save
+            </Button>
+          </SettingRow>
+
+          <ItemSeparator />
+          <SettingRow
+            title="Current version"
+            description={
+              can.editWorkspace
+                ? 'The version the work is on now. It is highlighted when anyone files, fixes, resolves or tests'
+                : 'Set by the owner and the admins of this workspace'
+            }
+          >
+            <WhyDisabled
+              reason={
+                !can.editWorkspace
+                  ? 'Only the owner and admins can change it'
+                  : version !== null && !version
+                    ? 'Type a version'
+                    : null
+              }
+              className="max-w-[220px] text-right"
+            />
+            <Input
+              className="w-[140px]"
+              value={version ?? active.currentVersion}
+              placeholder="1.0.0"
+              maxLength={VERSION_MAX}
+              disabled={!can.editWorkspace}
+              onChange={e => setVersion(cleanVersion(e.target.value))}
+            />
+            <Button
+              size="sm"
+              disabled={!can.editWorkspace || !version || version === active.currentVersion}
+              onClick={() =>
+                void setCurrentVersion(active.id, version ?? '')
+                  .then(() => {
+                    setVersion(null);
+                    toast.success('Current version saved');
+                  })
+                  .catch(err => toast.error(errorText(err)))
               }
             >
               Save

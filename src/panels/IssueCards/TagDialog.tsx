@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 import TagBadge from '@/components/shared/TagBadge';
+import WhyDisabled from '@/components/shared/WhyDisabled';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -117,7 +118,8 @@ export default function TagDialog({ open, onOpenChange, tag = null, onCreated }:
           </Field>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="items-center">
+          <WhyDisabled reason={clean ? null : 'Type a tag name first'} className="sm:mr-auto" />
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
